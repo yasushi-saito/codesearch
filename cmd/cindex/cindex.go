@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime/pprof"
 	"sort"
 
@@ -41,7 +42,7 @@ itself is a useful command to run in a nightly cron job.
 
 The -list flag causes cindex to list the paths it has indexed and exit.
 
-By default cindex adds the named paths to the index but preserves 
+By default cindex adds the named paths to the index but preserves
 information about other paths that might already be indexed
 (the ones printed by cindex -list).  The -reset flag causes cindex to
 delete the existing index before indexing the new paths.
@@ -57,6 +58,7 @@ var (
 	listFlag    = flag.Bool("list", false, "list indexed paths and exit")
 	resetFlag   = flag.Bool("reset", false, "discard existing index")
 	verboseFlag = flag.Bool("verbose", false, "print extra information")
+	excludeFlag = flag.String("exclude", "", "Path names to exclude")
 	cpuProfile  = flag.String("cpuprofile", "", "write cpu profile to this file")
 )
 
@@ -120,6 +122,10 @@ func main() {
 	if !*resetFlag {
 		file += "~"
 	}
+	var excludeRe *regexp.Regexp = nil
+	if excludeFlag != nil {
+		excludeRe = regexp.MustCompile(*excludeFlag)
+	}
 
 	ix := index.Create(file)
 	ix.Verbose = *verboseFlag
@@ -127,14 +133,21 @@ func main() {
 	for _, arg := range args {
 		log.Printf("index %s", arg)
 		filepath.Walk(arg, func(path string, info os.FileInfo, err error) error {
+			skip := false
+			if excludeRe != nil && excludeRe.MatchString(path) {
+				skip = true
+			}
 			if _, elem := filepath.Split(path); elem != "" {
 				// Skip various temporary or "hidden" files or directories.
 				if elem[0] == '.' || elem[0] == '#' || elem[0] == '~' || elem[len(elem)-1] == '~' {
-					if info.IsDir() {
-						return filepath.SkipDir
-					}
-					return nil
+					skip = true
 				}
+			}
+			if skip {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 			if err != nil {
 				log.Printf("%s: %s", path, err)
